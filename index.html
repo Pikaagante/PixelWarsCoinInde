@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Pixel Wars 🎄</title>
+<style>
+  body { margin:0; font-family: sans-serif; background: #eee; display:flex; flex-direction:column; align-items:center; }
+  canvas { background: #fff; border:1px solid #000; cursor: crosshair; }
+  .palette { margin:10px; display:flex; flex-wrap: wrap; max-width: 800px; justify-content: center; }
+  .color-btn { width:30px; height:30px; border:none; margin:2px; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>Pixel Wars 🎄</h1>
+<canvas id="canvas" width="800" height="600"></canvas>
+<div class="palette" id="palette"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const GRID_WIDTH = 1000;
+const GRID_HEIGHT = 1000;
+let pixelSize = 10;
+let zoom = 1;
+let offsetX = 0;
+let offsetY = 0;
+
+let selectedColor = '#ff0000';
+const colors = [
+  // rouges
+  '#ff0000', '#ff6666', '#990000',
+  // verts
+  '#00ff00', '#66ff66', '#009900',
+  // bleus
+  '#0000ff', '#6666ff', '#000099',
+  // jaunes
+  '#ffff00', '#ffff66', '#999900',
+  // violets
+  '#ff00ff', '#cc66ff', '#660099',
+  // cyan / turquoises
+  '#00ffff', '#66ffff', '#009999',
+  // oranges
+  '#ff9900', '#ffcc66', '#994400',
+  // gris / noir / blanc
+  '#000000', '#666666', '#999999', '#ffffff'
+];
+
+let grid = Array(GRID_WIDTH).fill(0).map(() => Array(GRID_HEIGHT).fill('#ffffff'));
+let mouse = {x:0, y:0};
+
+// Palette de couleurs
+const paletteDiv = document.getElementById('palette');
+colors.forEach(c=>{
+  const btn = document.createElement('button');
+  btn.className = 'color-btn';
+  btn.style.backgroundColor = c;
+  btn.onclick = ()=> selectedColor = c;
+  paletteDiv.appendChild(btn);
+});
+
+// Dessin de la grille et pixels (optimisé)
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const startX = Math.max(0, Math.floor(offsetX / (pixelSize*zoom)));
+  const endX = Math.min(GRID_WIDTH, Math.ceil((offsetX + canvas.width) / (pixelSize*zoom)));
+  const startY = Math.max(0, Math.floor(offsetY / (pixelSize*zoom)));
+  const endY = Math.min(GRID_HEIGHT, Math.ceil((offsetY + canvas.height) / (pixelSize*zoom)));
+
+  // Dessiner pixels visibles
+  for(let x=startX; x<endX; x++){
+    for(let y=startY; y<endY; y++){
+      ctx.fillStyle = grid[x][y];
+      ctx.fillRect(x*pixelSize*zoom - offsetX, y*pixelSize*zoom - offsetY, pixelSize*zoom, pixelSize*zoom);
+    }
+  }
+
+  // Cadrillage
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 1;
+  for(let x=startX; x<=endX; x++){
+    ctx.beginPath();
+    ctx.moveTo(x*pixelSize*zoom - offsetX, 0 - offsetY);
+    ctx.lineTo(x*pixelSize*zoom - offsetX, canvas.height);
+    ctx.stroke();
+  }
+  for(let y=startY; y<=endY; y++){
+    ctx.beginPath();
+    ctx.moveTo(0 - offsetX, y*pixelSize*zoom - offsetY);
+    ctx.lineTo(canvas.width, y*pixelSize*zoom - offsetY);
+    ctx.stroke();
+  }
+
+  // Surbrillance du pixel sous la souris
+  const mx = Math.floor((mouse.x + offsetX) / (pixelSize*zoom));
+  const my = Math.floor((mouse.y + offsetY) / (pixelSize*zoom));
+  if(mx>=0 && mx<GRID_WIDTH && my>=0 && my<GRID_HEIGHT){
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(mx*pixelSize*zoom - offsetX, my*pixelSize*zoom - offsetY, pixelSize*zoom, pixelSize*zoom);
+  }
+}
+
+// Interaction souris
+canvas.addEventListener('mousemove', e=>{
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+  draw();
+});
+
+canvas.addEventListener('click', async e=>{
+  const mx = Math.floor((mouse.x + offsetX) / (pixelSize*zoom));
+  const my = Math.floor((mouse.y + offsetY) / (pixelSize*zoom));
+  if(mx>=0 && mx<GRID_WIDTH && my>=0 && my<GRID_HEIGHT){
+    grid[mx][my] = selectedColor;
+    draw();
+    try {
+      await fetch('/api/pixels', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ x: mx, y: my, color: selectedColor })
+      });
+    } catch(e){
+      console.log("Impossible de sauvegarder (serveur non lancé) :", e);
+    }
+  }
+});
+
+// Zoom avec molette
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  if(e.deltaY<0) zoom*=1.1;
+  else zoom/=1.1;
+  zoom = Math.max(1, Math.min(20, zoom));
+  draw();
+});
+
+// Déplacement de la vue avec clic droit ou shift + clic
+let isDragging = false;
+let dragStart = {x:0, y:0};
+canvas.addEventListener('mousedown', e=>{
+  if(e.button===2 || e.shiftKey){
+    isDragging = true;
+    dragStart.x = e.clientX;
+    dragStart.y = e.clientY;
+  }
+});
+canvas.addEventListener('mouseup', e=> isDragging=false);
+canvas.addEventListener('mousemove', e=>{
+  if(isDragging){
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    offsetX -= dx;
+    offsetY -= dy;
+    dragStart.x = e.clientX;
+    dragStart.y = e.clientY;
+    draw();
+  }
+});
+
+// empêche menu contextuel clic droit
+canvas.addEventListener('contextmenu', e=> e.preventDefault());
+
+// récupérer la grille depuis le serveur
+async function fetchGrid() {
+  try {
+    const res = await fetch('/api/pixels');
+    const data = await res.json();
+    grid = Array(GRID_WIDTH).fill(0).map(() => Array(GRID_HEIGHT).fill('#ffffff'));
+    data.forEach(p => { grid[p.x][p.y] = p.color; });
+    draw();
+  } catch(e) {
+    console.log("Impossible de charger la grille :", e);
+  }
+}
+
+// refresh toutes les 2s pour voir les pixels des autres
+fetchGrid();
+setInterval(fetchGrid, 2000);
+
+draw();
+</script>
+</body>
+</html>
