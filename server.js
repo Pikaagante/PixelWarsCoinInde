@@ -54,3 +54,7 @@ app.post('/api/pixels', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+app.get('/api/download', (req, res) => {
+  res.download(FILE_PATH, 'pixels.json');
+});
